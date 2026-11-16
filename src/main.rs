@@ -48,7 +48,7 @@ fn parse_args() -> Result<Opts, String> {
                 println!("{USAGE}");
                 std::process::exit(0);
             }
-            "--color" | "--colour" => color = Some(true),
+            "--color" | "--colour" => color = Some(io::stdout().is_terminal()),
             "-d" => match args.next() {
                 Some(dir) => dirs.push(dir),
                 None => return Err("option '-d' requires a directory argument".into()),
