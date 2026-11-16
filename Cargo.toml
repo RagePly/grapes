@@ -4,5 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+ignore = "0.4.34"
+memchr = "2.8.3"
+memmap2 = "0.9.12"
 regex = "1.13.1"
-walkdir = "2.5.0"

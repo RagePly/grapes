@@ -58,7 +58,22 @@ grapes [-n] [-d DIR]... [--color[=WHEN]] [--] PATTERN...
 - Symlinks inside the tree are not followed, the same as `grep -r`. Hidden
   files and directories (e.g. `.git`) are searched, and `.gitignore` is not
   applied.
-- Files are visited in sorted order, so the output is the same on every run.
+- Files are searched in parallel, so the order of files in the output can
+  change from run to run. The lines of each file are always printed together,
+  in file order.
+
+### Performance
+
+grapes searches files in parallel and memory-maps large files. It runs about
+as fast as [ripgrep](https://github.com/BurntSushi/ripgrep) with
+`--no-ignore --hidden` and is several times faster than `grep -r`. To measure
+it on your machine:
+
+```sh
+cargo build --release
+python3 bench/gen.py target/bench-data   # ~2.5 GB of test data
+python3 bench/run.py target/bench-data
+```
 
 ### Exit status
 
