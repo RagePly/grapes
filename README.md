@@ -45,8 +45,13 @@ grapes [-d DIR]... [--color[=WHEN]] [--] PATTERN...
   but different patterns can match on different lines.
 - A file matches when **all** patterns match somewhere in it.
 - For each matching file, every line that any pattern hits is printed in file
-  order as `path:line`. With colour on, the matches are highlighted using
-  grep's default colours.
+  order as `path:line`.
+- With colour on, each match is highlighted in bold 24-bit colour chosen by
+  its pattern's position on the command line: 1st coral red, 2nd sky blue,
+  3rd spring green, 4th amber, 5th lavender, 6th teal, 7th rose pink, 8th
+  tangerine. After the 8th pattern the colours start over. Where matches of
+  different patterns overlap, the pattern given earlier wins. The colours
+  need a terminal with true-colour support.
 - If a matching file contains NUL bytes, it is treated as binary and grapes
   prints `Binary file PATH matches` in place of its lines.
 - Symlinks inside the tree are not followed, the same as `grep -r`. Hidden

@@ -6,7 +6,8 @@
 //! Each DIR (default: the current directory) is searched recursively (symlinks are not followed,
 //! same as `grep -r`). Matching is case-insensitive and line-based. For each
 //! matching file, every line hit by any of the patterns is printed in file
-//! order as `path:line`, with matches highlighted like `grep --color`.
+//! order as `path:line`, with each match highlighted in a 24-bit colour chosen
+//! by its pattern's position on the command line (first pattern = red).
 
 use regex::bytes::{Regex, RegexBuilder};
 use std::fs;
@@ -19,11 +20,24 @@ const USAGE: &str = "usage: grapes [-d DIR]... [--color[=WHEN]] [--] PATTERN...\
     patterns (case-insensitive). -d may be repeated. WHEN is 'auto' (default),\n\
     'always' or 'never'. Use -- before patterns that start with '-'.";
 
-// Default GREP_COLORS: ms=01;31 fn=35 se=36
-const C_MATCH: &str = "\x1b[01;31m\x1b[K";
+// File name and separator use grep's default GREP_COLORS (fn=35 se=36).
 const C_FILE: &str = "\x1b[35m\x1b[K";
 const C_SEP: &str = "\x1b[36m\x1b[K";
 const C_END: &str = "\x1b[m\x1b[K";
+
+/// Bold true-colour highlight per pattern, by CLI position; cycles after the
+/// last entry. Tuned to be distinct from each other and readable on dark or
+/// light backgrounds.
+const PALETTE: [(u8, u8, u8); 8] = [
+    (255, 85, 85),   // coral red
+    (90, 170, 255),  // sky blue
+    (130, 220, 90),  // spring green
+    (255, 190, 60),  // amber
+    (190, 130, 255), // lavender
+    (40, 210, 195),  // teal
+    (255, 120, 190), // rose pink
+    (255, 140, 50),  // tangerine
+];
 
 struct Opts {
     color: bool,
@@ -77,10 +91,11 @@ fn parse_args() -> Result<Opts, String> {
     Ok(Opts { color, dirs, patterns })
 }
 
-/// A line containing at least one match, with merged non-empty match spans.
+/// A line containing at least one match, with sorted, non-overlapping
+/// highlight spans `(start, end, pattern_index)`.
 struct Hit<'a> {
     line: &'a [u8],
-    spans: Vec<(usize, usize)>,
+    spans: Vec<(usize, usize, usize)>,
 }
 
 /// Returns the matching lines if every regex matches in `data`, else None.
@@ -102,25 +117,35 @@ fn search<'a>(data: &'a [u8], regexes: &[Regex]) -> Option<Vec<Hit<'a>>> {
                 found[i] = true;
                 hit = true;
                 if !m.is_empty() {
-                    spans.push((m.start(), m.end()));
+                    spans.push((m.start(), m.end(), i));
                 }
             }
         }
         if hit {
-            hits.push(Hit { line, spans: merge(spans) });
+            hits.push(Hit { line, spans: paint(line.len(), &spans) });
         }
     }
     found.iter().all(|&f| f).then_some(hits)
 }
 
-/// Sorts spans and merges overlapping or adjacent ones.
-fn merge(mut spans: Vec<(usize, usize)>) -> Vec<(usize, usize)> {
-    spans.sort_unstable();
-    let mut out: Vec<(usize, usize)> = Vec::with_capacity(spans.len());
-    for (s, e) in spans {
+/// Resolves possibly overlapping `(start, end, pattern)` spans into sorted,
+/// non-overlapping ones. Where patterns overlap, the earlier pattern on the
+/// command line wins; adjacent bytes of the same pattern form one span.
+fn paint(len: usize, spans: &[(usize, usize, usize)]) -> Vec<(usize, usize, usize)> {
+    let mut owner = vec![usize::MAX; len];
+    for &(s, e, p) in spans {
+        for o in &mut owner[s..e] {
+            *o = (*o).min(p);
+        }
+    }
+    let mut out: Vec<(usize, usize, usize)> = Vec::new();
+    for (i, &p) in owner.iter().enumerate() {
+        if p == usize::MAX {
+            continue;
+        }
         match out.last_mut() {
-            Some(last) if s <= last.1 => last.1 = last.1.max(e),
-            _ => out.push((s, e)),
+            Some(last) if last.1 == i && last.2 == p => last.1 = i + 1,
+            _ => out.push((i, i + 1, p)),
         }
     }
     out
@@ -134,9 +159,10 @@ fn print_hit(out: &mut impl Write, path: &str, hit: &Hit, color: bool) -> io::Re
     }
     write!(out, "{C_FILE}{path}{C_END}{C_SEP}:{C_END}")?;
     let mut pos = 0;
-    for &(s, e) in &hit.spans {
+    for &(s, e, p) in &hit.spans {
+        let (r, g, b) = PALETTE[p % PALETTE.len()];
         out.write_all(&hit.line[pos..s])?;
-        out.write_all(C_MATCH.as_bytes())?;
+        write!(out, "\x1b[1;38;2;{r};{g};{b}m\x1b[K")?;
         out.write_all(&hit.line[s..e])?;
         out.write_all(C_END.as_bytes())?;
         pos = e;
@@ -220,5 +246,21 @@ fn main() -> ExitCode {
             eprintln!("grapes: {err}");
             ExitCode::from(2)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::paint;
+
+    #[test]
+    fn earlier_pattern_wins_overlap() {
+        // "abcdef": pattern 1 covers b..e, pattern 0 covers c..d.
+        assert_eq!(paint(6, &[(1, 5, 1), (2, 4, 0)]), [(1, 2, 1), (2, 4, 0), (4, 5, 1)]);
+    }
+
+    #[test]
+    fn same_pattern_spans_merge() {
+        assert_eq!(paint(6, &[(0, 2, 0), (2, 4, 0), (5, 6, 1)]), [(0, 4, 0), (5, 6, 1)]);
     }
 }
