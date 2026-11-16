@@ -33,9 +33,9 @@ const C_END: &str = "\x1b[m\x1b[K";
 /// light backgrounds.
 const PALETTE: [(u8, u8, u8); 8] = [
     (255, 85, 85),   // coral red
+    (255, 190, 60),  // amber
     (90, 170, 255),  // sky blue
     (130, 220, 90),  // spring green
-    (255, 190, 60),  // amber
     (190, 130, 255), // lavender
     (40, 210, 195),  // teal
     (255, 120, 190), // rose pink

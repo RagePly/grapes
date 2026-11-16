@@ -48,8 +48,8 @@ grapes [-n] [-d DIR]... [--color[=WHEN]] [--] PATTERN...
 - For each matching file, every line that any pattern hits is printed in file
   order as `path:line`, or as `path:N:line` with `-n`.
 - With colour on, each match is highlighted in bold 24-bit colour chosen by
-  its pattern's position on the command line: 1st coral red, 2nd sky blue,
-  3rd spring green, 4th amber, 5th lavender, 6th teal, 7th rose pink, 8th
+  its pattern's position on the command line: 1st coral red, 2nd amber,
+  3rd sky blue, 4th spring green, 5th lavender, 6th teal, 7th rose pink, 8th
   tangerine. After the 8th pattern the colours start over. Where matches of
   different patterns overlap, the pattern given earlier wins. The colours
   need a terminal with true-colour support.
