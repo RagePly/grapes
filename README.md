@@ -26,12 +26,13 @@ cargo build --release   # binary at target/release/grapes
 ## Usage
 
 ```
-grapes [-d DIR]... [--color[=WHEN]] [--] PATTERN...
+grapes [-n] [-d DIR]... [--color[=WHEN]] [--] PATTERN...
 ```
 
 | Option            | Description                                                                 |
 |-------------------|-----------------------------------------------------------------------------|
 | `-d DIR`, `-dDIR` | Directory to search recursively. Can be repeated. Defaults to `.`.          |
+| `-n`, `--line-number` | Prefix each line with its 1-based line number: `path:N:line`. |
 | `--color=WHEN`    | Highlight output: `auto` (default; only when stdout is a terminal), `always` or `never`. `--colour` is also accepted. |
 | `--`              | End of options. Use it before patterns that start with `-`.                 |
 | `-h`, `--help`    | Show usage.                                                                 |
@@ -45,7 +46,7 @@ grapes [-d DIR]... [--color[=WHEN]] [--] PATTERN...
   but different patterns can match on different lines.
 - A file matches when **all** patterns match somewhere in it.
 - For each matching file, every line that any pattern hits is printed in file
-  order as `path:line`.
+  order as `path:line`, or as `path:N:line` with `-n`.
 - With colour on, each match is highlighted in bold 24-bit colour chosen by
   its pattern's position on the command line: 1st coral red, 2nd sky blue,
   3rd spring green, 4th amber, 5th lavender, 6th teal, 7th rose pink, 8th
@@ -72,6 +73,9 @@ grapes [-d DIR]... [--color[=WHEN]] [--] PATTERN...
 ```sh
 # Files that mention both "parse" and "error", anywhere under src/ and tests/
 grapes -d src -d tests parse error
+
+# Same, with line numbers
+grapes -n -d src -d tests parse error
 
 # Regexes work; patterns starting with '-' need --
 grapes 'fn \w+_test' -- '-> Result'

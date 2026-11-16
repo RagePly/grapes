@@ -1,12 +1,12 @@
 //! grapes: like `grep -ri`, but takes several patterns and only reports files
 //! in which *every* pattern matches somewhere (in any order).
 //!
-//! Usage: grapes [-d DIR]... [--color[=WHEN]] [--] PATTERN...
+//! Usage: grapes [-n] [-d DIR]... [--color[=WHEN]] [--] PATTERN...
 //!
 //! Each DIR (default: the current directory) is searched recursively (symlinks are not followed,
 //! same as `grep -r`). Matching is case-insensitive and line-based. For each
 //! matching file, every line hit by any of the patterns is printed in file
-//! order as `path:line`, with each match highlighted in a 24-bit colour chosen
+//! order as `path:line` (or `path:N:line` with -n), with each match highlighted in a 24-bit colour chosen
 //! by its pattern's position on the command line (first pattern = red).
 
 use regex::bytes::{Regex, RegexBuilder};
@@ -15,13 +15,16 @@ use std::io::{self, BufWriter, IsTerminal, Write};
 use std::process::ExitCode;
 use walkdir::WalkDir;
 
-const USAGE: &str = "usage: grapes [-d DIR]... [--color[=WHEN]] [--] PATTERN...\n\
+const USAGE: &str = "usage: grapes [-n] [-d DIR]... [--color[=WHEN]] [--] PATTERN...\n\
     Recursively search DIR (default: current directory) for files matching ALL\n\
-    patterns (case-insensitive). -d may be repeated. WHEN is 'auto' (default),\n\
+    patterns (case-insensitive). -d may be repeated. -n (--line-number) prefixes\n\
+    each line with its 1-based line number. WHEN is 'auto' (default),\n\
     'always' or 'never'. Use -- before patterns that start with '-'.";
 
-// File name and separator use grep's default GREP_COLORS (fn=35 se=36).
+// File name, line number and separator use grep's default GREP_COLORS
+// (fn=35 ln=32 se=36).
 const C_FILE: &str = "\x1b[35m\x1b[K";
+const C_LINENO: &str = "\x1b[32m\x1b[K";
 const C_SEP: &str = "\x1b[36m\x1b[K";
 const C_END: &str = "\x1b[m\x1b[K";
 
@@ -41,12 +44,14 @@ const PALETTE: [(u8, u8, u8); 8] = [
 
 struct Opts {
     color: bool,
+    line_number: bool,
     dirs: Vec<String>,
     patterns: Vec<String>,
 }
 
 fn parse_args() -> Result<Opts, String> {
     let mut color = None;
+    let mut line_number = false;
     let mut dirs = Vec::new();
     let mut patterns = Vec::new();
     let mut opts_done = false;
@@ -62,6 +67,7 @@ fn parse_args() -> Result<Opts, String> {
                 println!("{USAGE}");
                 std::process::exit(0);
             }
+            "-n" | "--line-number" => line_number = true,
             "--color" | "--colour" => color = Some(io::stdout().is_terminal()),
             "-d" => match args.next() {
                 Some(dir) => dirs.push(dir),
@@ -88,12 +94,14 @@ fn parse_args() -> Result<Opts, String> {
         dirs.push(".".into());
     }
     let color = color.unwrap_or_else(|| io::stdout().is_terminal());
-    Ok(Opts { color, dirs, patterns })
+    Ok(Opts { color, line_number, dirs, patterns })
 }
 
 /// A line containing at least one match, with sorted, non-overlapping
 /// highlight spans `(start, end, pattern_index)`.
 struct Hit<'a> {
+    /// 1-based line number within the file.
+    number: usize,
     line: &'a [u8],
     spans: Vec<(usize, usize, usize)>,
 }
@@ -109,7 +117,7 @@ fn search<'a>(data: &'a [u8], regexes: &[Regex]) -> Option<Vec<Hit<'a>>> {
     let body = data.strip_suffix(b"\n").unwrap_or(data);
     let mut found = vec![false; regexes.len()];
     let mut hits = Vec::new();
-    for line in body.split(|&b| b == b'\n') {
+    for (idx, line) in body.split(|&b| b == b'\n').enumerate() {
         let mut hit = false;
         let mut spans = Vec::new();
         for (i, re) in regexes.iter().enumerate() {
@@ -122,7 +130,7 @@ fn search<'a>(data: &'a [u8], regexes: &[Regex]) -> Option<Vec<Hit<'a>>> {
             }
         }
         if hit {
-            hits.push(Hit { line, spans: paint(line.len(), &spans) });
+            hits.push(Hit { number: idx + 1, line, spans: paint(line.len(), &spans) });
         }
     }
     found.iter().all(|&f| f).then_some(hits)
@@ -151,13 +159,19 @@ fn paint(len: usize, spans: &[(usize, usize, usize)]) -> Vec<(usize, usize, usiz
     out
 }
 
-fn print_hit(out: &mut impl Write, path: &str, hit: &Hit, color: bool) -> io::Result<()> {
-    if !color {
+fn print_hit(out: &mut impl Write, path: &str, hit: &Hit, opts: &Opts) -> io::Result<()> {
+    if !opts.color {
         write!(out, "{path}:")?;
+        if opts.line_number {
+            write!(out, "{}:", hit.number)?;
+        }
         out.write_all(hit.line)?;
         return out.write_all(b"\n");
     }
     write!(out, "{C_FILE}{path}{C_END}{C_SEP}:{C_END}")?;
+    if opts.line_number {
+        write!(out, "{C_LINENO}{}{C_END}{C_SEP}:{C_END}", hit.number)?;
+    }
     let mut pos = 0;
     for &(s, e, p) in &hit.spans {
         let (r, g, b) = PALETTE[p % PALETTE.len()];
@@ -207,7 +221,7 @@ fn run(opts: &Opts, regexes: &[Regex], had_error: &mut bool) -> io::Result<bool>
             continue;
         }
         for hit in &hits {
-            print_hit(&mut out, &display, hit, opts.color)?;
+            print_hit(&mut out, &display, hit, opts)?;
         }
     }
     out.flush()?;
@@ -251,12 +265,21 @@ fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
-    use super::paint;
+    use super::{RegexBuilder, paint, search};
 
     #[test]
     fn earlier_pattern_wins_overlap() {
         // "abcdef": pattern 1 covers b..e, pattern 0 covers c..d.
         assert_eq!(paint(6, &[(1, 5, 1), (2, 4, 0)]), [(1, 2, 1), (2, 4, 0), (4, 5, 1)]);
+    }
+
+    #[test]
+    fn hits_carry_one_based_line_numbers() {
+        let re = |p| RegexBuilder::new(p).case_insensitive(true).build().unwrap();
+        let data = b"alpha\nnothing\nBETA\nalpha beta\n";
+        let hits = search(data, &[re("alpha"), re("beta")]).unwrap();
+        let numbers: Vec<_> = hits.iter().map(|h| h.number).collect();
+        assert_eq!(numbers, [1, 3, 4]);
     }
 
     #[test]
